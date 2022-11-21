@@ -32,6 +32,8 @@ static const char* TAG = "to_bmp";
 
 static const int BMP_HEADER_LEN = 54;
 
+unsigned JD_FORMAT = 0;
+
 typedef struct {
     uint32_t filesize;
     uint32_t reserved;
@@ -307,10 +309,12 @@ bool jpg2gray(const uint8_t *src, size_t src_len, uint8_t * out, jpg_scale_t sca
     jpeg.input = src;
     jpeg.output = out;
     jpeg.data_offset = 0;
+    JD_FORMAT = 2; /* Put decoder in monochrome mode*/
 
     if(esp_jpg_decode(src_len, scale, _jpg_read, _gray_write, (void*)&jpeg) != ESP_OK){
         return false;
     }
+    JD_FORMAT = 0; /*Put back into RGB mode*/
     return true;
 }
 
@@ -322,10 +326,12 @@ bool jpg2gray_filtered(const uint8_t *src, size_t src_len, uint8_t * out, jpg_sc
     jpeg.input = src;
     jpeg.output = out;
     jpeg.data_offset = 0;
+    JD_FORMAT = 2; /* Put decoder in monochrome mode*/
 
     if(esp_jpg_decode(src_len, scale, _jpg_read, _gray_write_filtered, (void*)&jpeg) != ESP_OK){
         return false;
     }
+    JD_FORMAT = 0; /*Put back into RGB mode by default*/
     return true;
 }
 bool jpg2rgb565(const uint8_t *src, size_t src_len, uint8_t * out, jpg_scale_t scale)
@@ -336,10 +342,12 @@ bool jpg2rgb565(const uint8_t *src, size_t src_len, uint8_t * out, jpg_scale_t s
     jpeg.input = src;
     jpeg.output = out;
     jpeg.data_offset = 0;
+    JD_FORMAT = 1; /* Put decoder in RGB565 (16-bit/pix) mode*/
 
     if(esp_jpg_decode(src_len, scale, _jpg_read, _rgb565_write, (void*)&jpeg) != ESP_OK){
         return false;
     }
+    JD_FORMAT = 0; /* Back to RGB888 (24-bit/pix) mode by default*/
     return true;
 }
 
