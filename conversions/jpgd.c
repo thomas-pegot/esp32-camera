@@ -25,6 +25,7 @@
 /----------------------------------------------------------------------------*/
 
 #include "jpgd.h"
+#include "math.h"
 
 
 #define NUM_DEQUANTIZER_TABLES 4
@@ -607,6 +608,23 @@ static void block_dct_filter (
 	}
 }
 
+// sqrt_i32 computes the squrare root of a 32bit integer and returns
+// a 32bit integer value. It requires that v is positive.
+int32_t sqrt_i32(int32_t v) {
+    uint32_t b = 1<<30, q = 0, r = v;
+    while (b > r)
+        b >>= 2;
+    while( b > 0 ) {
+        uint32_t t = q + b;
+        q >>= 1;           
+        if( r >= t ) {     
+            r -= t;        
+            q += b;        
+        }
+        b >>= 2;
+    }
+    return q;
+}
 
 /*-----------------------------------------------------------------------*/
 /* Apply Inverse-DCT in Arai Algorithm (see also aa_idct.png)            */
@@ -629,6 +647,29 @@ static void block_idct (
 		v2 = src[8 * 4];
 		v3 = src[8 * 6];
 
+		v4 = src[8 * 7];	/* Get odd elements */
+		v5 = src[8 * 1];
+		v6 = src[8 * 5];
+		v7 = src[8 * 3];
+#if DCT_FILTER == 1
+		/* DCT filter : Avg - 3.sigma < vi < Avg + 3.sigma */
+		const int32_t avg = (v0+v1+v2+v3+v4+v5+v6+v7)>>3; // avg = sum / 8
+		const int32_t three_std = sqrt_i32(pow((v0 - avg), 2) +pow((v1 - avg), 2) +pow((v2 - avg), 2) +\
+			pow((v4 - avg), 2) +pow((v5 - avg), 2) +pow((v6 - avg), 2) +pow((v7 - avg), 2)) * 3;
+		v0 = (abs(v0 - avg) < three_std) ? v0 : 0;
+#endif
+#if PHASE_DCT == 1
+		v0 = abs(v0);
+#elif PHASE_DCT == 2
+		v0 = (v0 > (int32_t)0) - (v0 < (int32_t)0);
+		v1 = (v1 > (int32_t)0) - (v1 < (int32_t)0);
+		v2 = (v2 > (int32_t)0) - (v2 < (int32_t)0);
+		v3 = (v3 > (int32_t)0) - (v3 < (int32_t)0);
+		v4 = (v4 > (int32_t)0) - (v4 < (int32_t)0);
+		v5 = (v5 > (int32_t)0) - (v5 < (int32_t)0);
+		v6 = (v6 > (int32_t)0) - (v6 < (int32_t)0);
+		v7 = (v7 > (int32_t)0) - (v7 < (int32_t)0);
+#endif
 		t10 = v0 + v2;		/* Process the even elements */
 		t12 = v0 - v2;
 		t11 = (v1 - v3) * M13 >> 12;
@@ -639,10 +680,6 @@ static void block_idct (
 		v1 = t11 + t12;
 		v2 = t12 - t11;
 
-		v4 = src[8 * 7];	/* Get odd elements */
-		v5 = src[8 * 1];
-		v6 = src[8 * 5];
-		v7 = src[8 * 3];
 
 		t10 = v5 - v4;		/* Process the odd elements */
 		t11 = v5 + v4;
@@ -655,6 +692,9 @@ static void block_idct (
 		v6 = t13 - (t12 * M4 >> 12) - v7;
 		v5 -= v6;
 		v4 -= v5;
+
+
+
 
 		src[8 * 0] = v0 + v7;	/* Write-back transformed values */
 		src[8 * 7] = v0 - v7;
@@ -676,6 +716,31 @@ static void block_idct (
 		v2 = src[4];
 		v3 = src[6];
 
+
+
+		v4 = src[7];				/* Get odd elements */
+		v5 = src[1];
+		v6 = src[5];
+		v7 = src[3];
+#if DCT_FILTER == 1
+		/* DCT filter : Avg - 3.sigma < vi < Avg + 3.sigma */
+		const int32_t avg = (v0+v1+v2+v3+v4+v5+v6+v7)>>3; // avg = sum / 8
+		const int32_t three_std = sqrt_i32(pow((v0 - avg), 2) +pow((v1 - avg), 2) +pow((v2 - avg), 2) +\
+			pow((v4 - avg), 2) +pow((v5 - avg), 2) +pow((v6 - avg), 2) +pow((v7 - avg), 2)) * 3;
+		v0 = (abs(v0 - avg) < three_std) ? v0 : 0;
+#endif
+#if PHASE_DCT == 1
+		v0 = abs(v0);
+#elif PHASE_DCT == 2
+		v0 = (v0 > (int32_t)0) - (v0 < (int32_t)0);
+		v1 = (v1 > (int32_t)0) - (v1 < (int32_t)0);
+		v2 = (v2 > (int32_t)0) - (v2 < (int32_t)0);
+		v3 = (v3 > (int32_t)0) - (v3 < (int32_t)0);
+		v4 = (v4 > (int32_t)0) - (v4 < (int32_t)0);
+		v5 = (v5 > (int32_t)0) - (v5 < (int32_t)0);
+		v6 = (v6 > (int32_t)0) - (v6 < (int32_t)0);
+		v7 = (v7 > (int32_t)0) - (v7 < (int32_t)0);
+#endif
 		t10 = v0 + v2;				/* Process the even elements */
 		t12 = v0 - v2;
 		t11 = (v1 - v3) * M13 >> 12;
@@ -685,11 +750,6 @@ static void block_idct (
 		v3 = t10 - v3;
 		v1 = t11 + t12;
 		v2 = t12 - t11;
-
-		v4 = src[7];				/* Get odd elements */
-		v5 = src[1];
-		v6 = src[5];
-		v7 = src[3];
 
 		t10 = v5 - v4;				/* Process the odd elements */
 		t11 = v5 + v4;

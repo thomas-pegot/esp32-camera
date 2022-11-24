@@ -18,7 +18,7 @@ extern unsigned JD_FORMAT;
 /  1: Enable
 */
 
-#define JD_TBLCLIP		1
+#define JD_TBLCLIP		0
 /* Use table conversion for saturation arithmetic. A bit faster, but increases 1 KB of code size.
 /  0: Disable
 /  1: Enable
@@ -30,3 +30,18 @@ extern unsigned JD_FORMAT;
 /  1: + 32-bit barrel shifter. Suitable for 32-bit MCUs.
 /  2: + Table conversion for huffman decoding (wants 6 << HUFF_BIT bytes of RAM)
 */
+
+#define DCT_FILTER 0
+/** Filter on DCT trasnform outside pf Mean +/- 3 sigma
+ * No change in result and more computation so it's pretty useless
+ *  0: Disable
+ *  1: Enable
+ */
+
+
+#define PHASE_DCT 1
+/** Display DCT Phase / Modulation
+ *  0: Disable
+ *  1: DCT Modulation
+ *  2: DCT Phase
+ */
