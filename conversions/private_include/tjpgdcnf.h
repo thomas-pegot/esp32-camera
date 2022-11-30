@@ -39,9 +39,10 @@ extern unsigned JD_FORMAT;
  */
 
 
-#define PHASE_DCT 1
+#define PHASE_DCT 2
 /** Display DCT Phase / Modulation
  *  0: Disable
  *  1: DCT Modulation
- *  2: DCT Phase
+ *  2: motion detection DCT-sign based (DCT curr - DCT bg)
+ *  3: DCT-sign Threshold output 
  */

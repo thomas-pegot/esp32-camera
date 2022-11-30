@@ -153,15 +153,10 @@ static bool _gray_write(void * arg, uint16_t x, uint16_t y, uint16_t w, uint16_t
     return true;
 }
 
-#ifndef median
-#define median median
 static inline int median(int a, int b, int c)
 {
     return (b > a) == (a > c) ? a : (b > a) != (b > c) ? b : c;
 }
-#endif
-
-
 
 static bool _gray_write_filtered(void * arg, uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint8_t *data)
 {

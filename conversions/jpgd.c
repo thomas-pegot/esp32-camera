@@ -26,8 +26,12 @@
 
 #include "jpgd.h"
 #include "math.h"
-
-
+/*
+#include "esp_heap_caps.h" 
+#include "esp_heap_trace.h"
+#define NUM_RECORDS 100
+static heap_trace_record_t trace_record[NUM_RECORDS]; // This buffer must be in internal RAM
+*/
 #define NUM_DEQUANTIZER_TABLES 4
 
 #if JD_FASTDECODE == 2
@@ -48,7 +52,10 @@ static const uint8_t Zig[64] = {	/* Zigzag-order to raster-order conversion tabl
 	58, 59, 52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 63
 };
 
-
+#if PHASE_DCT >= 2
+static BgCtx bg = {
+	.width = 0, .height=0, .i=0, .j=0, .f_nb_update=3000, .thresh=10, .table=NULL};
+#endif
 
 /*-------------------------------------------------*/
 /* Input scale factor of Arai algorithm            */
@@ -579,34 +586,6 @@ static JRESULT restart (
 	jd->dcv[2] = jd->dcv[1] = jd->dcv[0] = 0;	/* Reset DC offset */
 	return JDR_OK;
 }
-/*-------------------------------*/
-/*  Apply  sign based filter     */
-/*-------------------------------*/
-
-static void block_dct_filter (
-	int32_t* src	/* Input block data (de-quantized and pre-scaled for Arai Algorithm) */
-)
-{
-	int k;
-
-	/* Process columns */
-	for (k = 0; k < 8; k++) {
-		for(int i=0; i < 64; i += 8)
-			src[i] = (src[i]>=0)? 0 : 128;
-
-		src++;	/* Next column */
-	}
-
-	/* Process rows */
-	src -= 8;
-	for (k = 0; k < 8; k++) {		
-		src[0] += 128L << 8;
-		for(int i=0; i < 8; i += 1)
-			src[i] = (src[i]>=0)? 0 : 128;
-
-		src += 8;	/* Next row */
-	}
-}
 
 // sqrt_i32 computes the squrare root of a 32bit integer and returns
 // a 32bit integer value. It requires that v is positive.
@@ -626,6 +605,15 @@ int32_t sqrt_i32(int32_t v) {
     return q;
 }
 
+static uint32_t eight_SAD(const int8_t *bg, const int8_t *cur) {
+	uint8_t i = 63;
+	uint32_t SAD = 0;
+	do {
+		SAD += (uint32_t)abs((int32_t)(cur[i] - bg[i]));
+	} while(i--);
+	return SAD;
+}
+
 /*-----------------------------------------------------------------------*/
 /* Apply Inverse-DCT in Arai Algorithm (see also aa_idct.png)            */
 /*-----------------------------------------------------------------------*/
@@ -635,10 +623,16 @@ static void block_idct (
 	jd_yuv_t* dst	/* Pointer to the destination to store the block as byte array */
 )
 {
+	
+    //ESP_ERROR_CHECK( heap_trace_start(HEAP_TRACE_LEAKS) );
 	const int32_t M13 = (int32_t)(1.41421*4096), M2 = (int32_t)(1.08239*4096), M4 = (int32_t)(2.61313*4096), M5 = (int32_t)(1.84776*4096);
 	int32_t v0, v1, v2, v3, v4, v5, v6, v7;
 	int32_t t10, t11, t12, t13;
 	int i;
+	//int8_t v[64] = {0};
+	int8_t *v = bg.curr;
+	int8_t *p_bg = bg.table;// &bg.table[bg.i * bg.width + bg.j];
+	static uint16_t cnt = 0;
 
 	/* Process columns */
 	for (i = 0; i < 8; i++) {
@@ -657,18 +651,34 @@ static void block_idct (
 		const int32_t three_std = sqrt_i32(pow((v0 - avg), 2) +pow((v1 - avg), 2) +pow((v2 - avg), 2) +\
 			pow((v4 - avg), 2) +pow((v5 - avg), 2) +pow((v6 - avg), 2) +pow((v7 - avg), 2)) * 3;
 		v0 = (abs(v0 - avg) < three_std) ? v0 : 0;
-#endif
-#if PHASE_DCT == 1
+#elif PHASE_DCT == 1
 		v0 = abs(v0);
-#elif PHASE_DCT == 2
-		v0 = (v0 > (int32_t)0) - (v0 < (int32_t)0);
-		v1 = (v1 > (int32_t)0) - (v1 < (int32_t)0);
-		v2 = (v2 > (int32_t)0) - (v2 < (int32_t)0);
-		v3 = (v3 > (int32_t)0) - (v3 < (int32_t)0);
-		v4 = (v4 > (int32_t)0) - (v4 < (int32_t)0);
-		v5 = (v5 > (int32_t)0) - (v5 < (int32_t)0);
-		v6 = (v6 > (int32_t)0) - (v6 < (int32_t)0);
-		v7 = (v7 > (int32_t)0) - (v7 < (int32_t)0);
+#elif PHASE_DCT >= 2
+		if(!cnt % bg.f_nb_update || !cnt) {  // update the first frame or every N frame bg
+#if PHASE_DCT == 2
+			// With Background
+			p_bg[8 * 0] = (int8_t)((v0 > (int32_t)0) - (v0 < (int32_t)0));
+			p_bg[8 * 2] = (int8_t)((v1 > (int32_t)0) - (v1 < (int32_t)0));
+			p_bg[8 * 4] = (int8_t)((v2 > (int32_t)0) - (v2 < (int32_t)0));
+			p_bg[8 * 6] = (int8_t)((v3 > (int32_t)0) - (v3 < (int32_t)0));
+			p_bg[8 * 7] = (int8_t)((v4 > (int32_t)0) - (v4 < (int32_t)0));
+			p_bg[8 * 1] = (int8_t)((v5 > (int32_t)0) - (v5 < (int32_t)0));
+			p_bg[8 * 5] = (int8_t)((v6 > (int32_t)0) - (v6 < (int32_t)0));
+			p_bg[8 * 3] = (int8_t)((v7 > (int32_t)0) - (v7 < (int32_t)0));
+#endif
+			// else without background <=> with background = 0 without update
+			p_bg++; 
+		} else {
+			v[8 * 0] = (int8_t)((v0 > (int32_t)0) - (v0 < (int32_t)0));
+			v[8 * 2] = (int8_t)((v1 > (int32_t)0) - (v1 < (int32_t)0));
+			v[8 * 4] = (int8_t)((v2 > (int32_t)0) - (v2 < (int32_t)0));
+			v[8 * 6] = (int8_t)((v3 > (int32_t)0) - (v3 < (int32_t)0));
+			v[8 * 7] = (int8_t)((v4 > (int32_t)0) - (v4 < (int32_t)0));
+			v[8 * 1] = (int8_t)((v5 > (int32_t)0) - (v5 < (int32_t)0));
+			v[8 * 5] = (int8_t)((v6 > (int32_t)0) - (v6 < (int32_t)0));
+			v[8 * 3] = (int8_t)((v7 > (int32_t)0) - (v7 < (int32_t)0));
+			v++;
+		}
 #endif
 		t10 = v0 + v2;		/* Process the even elements */
 		t12 = v0 - v2;
@@ -679,7 +689,6 @@ static void block_idct (
 		v3 = t10 - v3;
 		v1 = t11 + t12;
 		v2 = t12 - t11;
-
 
 		t10 = v5 - v4;		/* Process the odd elements */
 		t11 = v5 + v4;
@@ -692,8 +701,6 @@ static void block_idct (
 		v6 = t13 - (t12 * M4 >> 12) - v7;
 		v5 -= v6;
 		v4 -= v5;
-
-
 
 
 		src[8 * 0] = v0 + v7;	/* Write-back transformed values */
@@ -710,37 +717,30 @@ static void block_idct (
 
 	/* Process rows */
 	src -= 8;
+#if PHASE_DCT >= 2
+	cnt++;
+	if(!cnt % bg.f_nb_update || !cnt) { 
+		p_bg -= 8; 
+	} else {
+		v -= 8;
+		if((uint16_t)eight_SAD(p_bg, &v[0]) < bg.thresh) {  //
+			memset(&dst[0], (int16_t)128, 64*sizeof(int16_t));
+			dst += 64; src += 64; p_bg += 64;
+			return;
+		}
+	}
+#endif
 	for (i = 0; i < 8; i++) {
 		v0 = src[0] + (128L << 8);	/* Get even elements (remove DC offset (-128) here) */
 		v1 = src[2];
 		v2 = src[4];
 		v3 = src[6];
 
-
-
 		v4 = src[7];				/* Get odd elements */
 		v5 = src[1];
 		v6 = src[5];
 		v7 = src[3];
-#if DCT_FILTER == 1
-		/* DCT filter : Avg - 3.sigma < vi < Avg + 3.sigma */
-		const int32_t avg = (v0+v1+v2+v3+v4+v5+v6+v7)>>3; // avg = sum / 8
-		const int32_t three_std = sqrt_i32(pow((v0 - avg), 2) +pow((v1 - avg), 2) +pow((v2 - avg), 2) +\
-			pow((v4 - avg), 2) +pow((v5 - avg), 2) +pow((v6 - avg), 2) +pow((v7 - avg), 2)) * 3;
-		v0 = (abs(v0 - avg) < three_std) ? v0 : 0;
-#endif
-#if PHASE_DCT == 1
-		v0 = abs(v0);
-#elif PHASE_DCT == 2
-		v0 = (v0 > (int32_t)0) - (v0 < (int32_t)0);
-		v1 = (v1 > (int32_t)0) - (v1 < (int32_t)0);
-		v2 = (v2 > (int32_t)0) - (v2 < (int32_t)0);
-		v3 = (v3 > (int32_t)0) - (v3 < (int32_t)0);
-		v4 = (v4 > (int32_t)0) - (v4 < (int32_t)0);
-		v5 = (v5 > (int32_t)0) - (v5 < (int32_t)0);
-		v6 = (v6 > (int32_t)0) - (v6 < (int32_t)0);
-		v7 = (v7 > (int32_t)0) - (v7 < (int32_t)0);
-#endif
+
 		t10 = v0 + v2;				/* Process the even elements */
 		t12 = v0 - v2;
 		t11 = (v1 - v3) * M13 >> 12;
@@ -784,9 +784,11 @@ static void block_idct (
 		dst[4] = BYTECLIP((v3 - v4) >> 8);
 #endif
 		dst += 8; src += 8;	/* Next row */
+		p_bg += 8;
 	}
+    //ESP_ERROR_CHECK( heap_trace_stop() );
+    //heap_trace_dump();
 }
-
 
 
 
@@ -799,6 +801,7 @@ static JRESULT mcu_load (
 
 )
 {
+    //ESP_ERROR_CHECK( heap_trace_start(HEAP_TRACE_LEAKS) );
 	int32_t *tmp = (int32_t*)jd->workbuf;	/* Block working buffer for de-quantize and IDCT */
 	int d, e;
 	unsigned int blk, nby, i, bc, z, id, cmp;
@@ -857,23 +860,24 @@ static JRESULT mcu_load (
 			} while (++z < 64);		/* Next AC element */
 
 			if (JD_FORMAT != 2 || !cmp) {	/* C components may not be processed if in grayscale output */
-				if (z == 1 || (JD_USE_SCALE && jd->scale == 3)) {	/* If no AC element or scale ratio is 1/8, IDCT can be ommited and the block is filled with DC value */
+/*				if (z == 1 || (JD_USE_SCALE && jd->scale == 3)) {	// If no AC element or scale ratio is 1/8, IDCT can be ommited and the block is filled with DC value
 					d = (jd_yuv_t)((*tmp / 256) + 128);
 					if (JD_FASTDECODE >= 1) {
 						for (i = 0; i < 64; bp[i++] = d) ;
 					} else {
 						memset(bp, d, 64);
 					}
-				} else {
+				} else {*/
 						block_idct(tmp, bp);	/* Apply IDCT and store the block to the MCU buffer */
 				}
-			}
+//			}
 		}
-
 		bp += 64;				/* Next block */
 	}
 
 	return JDR_OK;	/* All blocks have been loaded successfully */
+	//ESP_ERROR_CHECK( heap_trace_stop() );
+    //heap_trace_dump();
 }
 
 
@@ -1209,6 +1213,7 @@ JRESULT jd_prepare (
 
 
 
+
 /*-----------------------------------------------------------------------*/
 /* Start to decompress the JPEG picture                                  */
 /*-----------------------------------------------------------------------*/
@@ -1219,6 +1224,8 @@ JRESULT jd_decomp (
 	uint8_t scale							/* Output de-scaling factor (0 to 3) */
 )
 {
+	
+    //ESP_ERROR_CHECK( heap_trace_init_standalone(trace_record, NUM_RECORDS) );
 	unsigned int x, y, mx, my;
 	uint16_t rst, rsc;
 	JRESULT rc;
@@ -1237,6 +1244,23 @@ JRESULT jd_decomp (
 	jd->dcv[2] = jd->dcv[1] = jd->dcv[0] = 0;	/* Initialize DC values */
 	rst = rsc = 0;
 
+	if(bg.width != jd->width || bg.height != jd->height){
+		//if change framesize then reallocate the background accordingly
+		static char first = 1;
+		bg.width = jd->width;
+		bg.height = jd->height;
+		if(first){
+			first = 0;
+			bg.table = (int8_t *)malloc(sizeof(int8_t) * jd->width * jd->height);
+			for(int i=0; i<jd->width*jd->height; bg.table[i++] = 0);
+			bg.curr = (int8_t *)calloc(64, 1);
+			
+		} else {
+			bg.table = (int8_t *)realloc(bg.table, sizeof(int8_t) * jd->width * jd->height);
+			for(int i=0; i<jd->width*jd->height; bg.table[i++] = 0);
+		}
+	}
+
 	rc = JDR_OK;
 	for (y = 0; y < jd->height; y += my) {		/* Vertical loop of MCUs */
 		for (x = 0; x < jd->width; x += mx) {	/* Horizontal loop of MCUs */
@@ -1245,6 +1269,8 @@ JRESULT jd_decomp (
 				if (rc != JDR_OK) return rc;
 				rst = 1;
 			}
+			bg.i = x;
+			bg.j = y;
 			rc = mcu_load(jd);					/* Load an MCU (decompress huffman coded stream, dequantize and apply IDCT) */
 			if (rc != JDR_OK) return rc;
 			rc = mcu_output(jd, outfunc, x, y);	/* Output the MCU (YCbCr to RGB, scaling and output) */
@@ -1252,7 +1278,7 @@ JRESULT jd_decomp (
 		}
 	}
 
-	return rc;
+	return rc;    
 }
 
 
