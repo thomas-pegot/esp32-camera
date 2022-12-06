@@ -29,11 +29,10 @@ typedef uint8_t jd_yuv_t;
 
 
 typedef struct {
-	size_t width, height;	/*  */
-	uint16_t f_nb_update;   /* nb of frame before bg update  */
-	uint16_t i,j;
-	uint16_t thresh;        /* threshold for diff with bg    */
-	int8_t *curr;			/* current Phase-DCT image ptr   */
+	uint16_t width, height;	/*  */
+	uint16_t f_nb_update;   /* nb of frame before bg update */
+	unsigned int i,j;			/* */
+	uint16_t thresh;        /* threshold for diff with bg*/
 	int8_t *table;			/* background Phase-DCT image ptr*/	
 } BgCtx;
 

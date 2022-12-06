@@ -38,11 +38,16 @@ extern unsigned JD_FORMAT;
  *  1: Enable
  */
 
+#define AC_OPTIM 0
+/** If 0 remove the optimisation that  consider if no AC then skip IDCT and fill with DC value
+ *  0 : Disable optim
+ *  1 : Enable
+ */
 
-#define PHASE_DCT 2
+#define PHASE_DCT 1
 /** Display DCT Phase / Modulation
  *  0: Disable
- *  1: DCT Modulation
- *  2: motion detection DCT-sign based (DCT curr - DCT bg)
- *  3: DCT-sign Threshold output 
- */
+ *  1: DCT Phase
+ *  2: motion detection DCT-sign based (DCT curr - DCT bg) with output
+ *  3: motion detection DCT-sign based (DCT curr - DCT bg) without output
+ * */
