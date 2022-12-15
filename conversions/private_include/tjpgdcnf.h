@@ -31,20 +31,13 @@ extern unsigned JD_FORMAT;
 /  2: + Table conversion for huffman decoding (wants 6 << HUFF_BIT bytes of RAM)
 */
 
-#define DCT_FILTER 0
-/** Filter on DCT trasnform outside pf Mean +/- 3 sigma
- * No change in result and more computation so it's pretty useless
- *  0: Disable
- *  1: Enable
- */
-
 #define AC_OPTIM 0
 /** If 0 remove the optimisation that  consider if no AC then skip IDCT and fill with DC value
  *  0 : Disable optim
  *  1 : Enable
  */
 
-#define PHASE_DCT 1
+#define PHASE_DCT 2
 /** Display DCT Phase / Modulation
  *  0: Disable
  *  1: DCT Phase

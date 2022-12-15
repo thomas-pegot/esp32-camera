@@ -32,7 +32,7 @@
 #define TAG ""
 #else
 #include "esp_log.h"
-static const char *TAG = "camera_httpd";
+static const char *TAG = "jpgd";
 #endif
 
 /*
@@ -64,7 +64,7 @@ static const uint8_t Zig[64] = {	/* Zigzag-order to raster-order conversion tabl
 #if PHASE_DCT >= 2
 static uint16_t cnt = 0;
 static BgCtx bg = {
-	.width = 0, .height=0, .i=0, .j=0, .f_nb_update=300, .thresh=10};
+	.width = 0, .height=0, .ind=0, .f_nb_update=300, .thresh= 4};
 #endif
 
 /*-------------------------------------------------*/
@@ -630,25 +630,36 @@ static void block_idct (
 	int32_t t10, t11, t12, t13;
 	int i;
 #if PHASE_DCT >= 2
-	int8_t curr = 0;
-	int8_t *p_bg = &bg.table[bg.i * bg.width + bg.j];
+	int8_t curr[64] = {0};
+	int8_t *p_bg = &bg.table[bg.ind];
+	int diff = 0;
 
-	v0 = src[8 * 0]; /* DC component*/
-	if(!(cnt % bg.f_nb_update) || !cnt) { 
-			*p_bg = (int8_t)((v0 > (int32_t)0) - (v0 < (int32_t)0)); /* capture background DCT sign */
-	}else { 			
-			curr = (int8_t)((v0 > (int32_t)0) - (v0 < (int32_t)0)); /* capture current image DCT sign */
-			if(abs(*p_bg - curr)<1) { /* SAD bg - curr if not same then change detected else display black */
-				memset(&dst[0], (int16_t)0, 64*sizeof(int16_t));
-				return;			
-			}
-#if PHASE_DCT == 3
-			else {
-				memset(&dst[0], (int16_t)127, 64*sizeof(int16_t));
-				return;	
-			}
-#endif
-	} 
+	for (i = 0; i < 3; i++) {
+		v0 = src[8 * 0 + i];
+		v1 = src[8 * 2 + i];
+		v2 = src[8 * 4 + i];
+		if(!(cnt % bg.f_nb_update) || !cnt) { 
+				/* Background DCT sgn*/
+				p_bg[0 + i] = (int8_t)((v0 > (int32_t)0) - (v0 < (int32_t)0)); 
+				p_bg[8 * 2 + i] = (int8_t)((v1 > (int32_t)0) - (v1 < (int32_t)0)); 
+				p_bg[8 * 4 + i] = (int8_t)((v2 > (int32_t)0) - (v2 < (int32_t)0)); 
+		}else {
+				/* Current DCT sign*/ 			
+				curr[0 + i] = (int8_t)((v0 > (int32_t)0) - (v0 < (int32_t)0)); 
+				curr[8 * 2 + i] = (int8_t)((v1 > (int32_t)0) - (v1 < (int32_t)0)); 
+				curr[8 * 4 + i] = (int8_t)((v2 > (int32_t)0) - (v2 < (int32_t)0)); 
+				/* SAD on current - bg */
+				diff += abs(curr[i] - p_bg[i]);
+				diff += abs(curr[8 * 2 + i] - p_bg[8 * 2 + i]);
+				diff += abs(curr[8 * 4 + i] - p_bg[8 * 4 + i]);
+		}
+	}
+	if((cnt % bg.f_nb_update) && cnt){
+		if(diff< 4) { /* SAD bg - curr if not same then change detected else display black */
+			memset(&dst[0], (int16_t)0, 64*sizeof(int16_t));
+			return;			
+		}
+	}
 #endif
 	/* Process columns */
 	for (i = 0; i < 8; i++) {
@@ -661,13 +672,6 @@ static void block_idct (
 		v5 = src[8 * 1];
 		v6 = src[8 * 5];
 		v7 = src[8 * 3];
-#if DCT_FILTER == 1
-		/* DCT filter : Avg - 3.sigma < vi < Avg + 3.sigma */
-		const int32_t avg = (v0+v1+v2+v3+v4+v5+v6+v7)>>3; // avg = sum / 8
-		const int32_t three_std = sqrt_i32(pow((v0 - avg), 2) +pow((v1 - avg), 2) +pow((v2 - avg), 2) +\
-			pow((v4 - avg), 2) +pow((v5 - avg), 2) +pow((v6 - avg), 2) +pow((v7 - avg), 2)) * 3;
-		v0 = (abs(v0 - avg) < three_std) ? v0 : 0;
-#endif
 #if PHASE_DCT == 1
 		dst[8 * 0] = (int8_t)((v0 > (int32_t)0) - (v0 < (int32_t)0));
 		dst[8 * 2] = (int8_t)((v1 > (int32_t)0) - (v1 < (int32_t)0));
@@ -864,6 +868,7 @@ static JRESULT mcu_load (
 				} else {
 #endif
 						block_idct(tmp, bp);	/* Apply IDCT and store the block to the MCU buffer */
+						bg.ind += 64;
 #if AC_OPTIM
 				}
 #endif
@@ -1265,21 +1270,14 @@ JRESULT jd_decomp (
 				if (rc != JDR_OK) return rc;
 				rst = 1;
 			}
-
 			rc = mcu_load(jd);					/* Load an MCU (decompress huffman coded stream, dequantize and apply IDCT) */
 			if (rc != JDR_OK) return rc;
 			rc = mcu_output(jd, outfunc, x, y);	/* Output the MCU (YCbCr to RGB, scaling and output) */
 			if (rc != JDR_OK) return rc;
-#if PHASE_DCT >= 2
-			bg.j += 64;
-#endif
 		}
-#if PHASE_DCT >= 2
-			bg.i++;
-#endif
 	}
 #if PHASE_DCT >=2
-	bg.i = 0; bg.j = 0;
+	bg.ind = 0;
 	cnt++; /* cnt related to background update*/
 #endif
 	return rc;    
